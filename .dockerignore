@@ -1,0 +1,19 @@
+# Dependencies & build output (rebuilt inside the image)
+node_modules
+.next
+out
+
+# Local data & secrets — must NEVER go into the image
+data
+.env
+.env.local
+.env.*.local
+
+# Dev / VCS / docs cruft
+.git
+.gitignore
+*.log
+*.pdf
+scripts/*.sh
+.claude
+tsconfig.tsbuildinfo

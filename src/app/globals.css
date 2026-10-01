@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- Theme tokens (dark = default) ---- */
+:root {
+  color-scheme: dark;
+
+  --c-white: 255 255 255;
+
+  --c-base-950: 7 10 18;
+  --c-base-900: 11 15 26;
+  --c-base-850: 15 21 36;
+  --c-base-800: 20 27 46;
+  --c-base-700: 29 39 64;
+  --c-base-600: 42 54 85;
+
+  --c-brand-50: 238 244 255;
+  --c-brand-100: 219 230 255;
+  --c-brand-200: 190 212 255;
+  --c-brand-300: 147 180 255;
+  --c-brand-400: 96 144 255;
+  --c-brand-500: 59 109 255;
+  --c-brand-600: 42 82 224;
+  --c-brand-700: 33 64 180;
+
+  --c-accent-400: 79 209 197;
+  --c-accent-500: 45 212 191;
+
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+
+  --c-red-300: 252 165 165;
+  --c-red-400: 248 113 113;
+  --c-red-500: 239 68 68;
+  --c-emerald-300: 110 231 183;
+  --c-emerald-400: 52 211 153;
+  --c-emerald-500: 16 185 129;
+  --c-amber-200: 253 230 138;
+  --c-amber-300: 252 211 77;
+  --c-amber-400: 251 191 36;
+  --c-amber-500: 245 158 11;
+
+  --grad-a: rgba(59, 109, 255, 0.12);
+  --grad-b: rgba(45, 212, 191, 0.1);
+}
+
+/* ---- Light theme overrides ---- */
+html.light {
+  color-scheme: light;
+
+  --c-white: 17 24 39; /* now dark "ink": headings + hairlines flip */
+
+  --c-base-950: 244 246 251; /* app background */
+  --c-base-900: 236 240 248; /* sidebar */
+  --c-base-850: 255 255 255; /* cards */
+  --c-base-800: 231 236 245;
+  --c-base-700: 217 224 236;
+  --c-base-600: 197 207 224;
+
+  --c-brand-100: 37 71 200;
+  --c-brand-200: 33 64 180;
+  --c-brand-300: 42 82 224;
+
+  --c-accent-400: 13 148 136;
+
+  --c-slate-100: 15 23 42; /* strongest text */
+  --c-slate-200: 30 41 59;
+  --c-slate-300: 51 65 85;
+  --c-slate-400: 71 85 105; /* muted */
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 148 163 184; /* faintest */
+
+  --c-red-300: 185 28 28;
+  --c-red-400: 220 38 38;
+  --c-emerald-300: 4 120 87;
+  --c-emerald-400: 5 150 105;
+  --c-amber-200: 180 83 9;
+  --c-amber-300: 217 119 6;
+
+  --grad-a: rgba(59, 109, 255, 0.1);
+  --grad-b: rgba(45, 212, 191, 0.09);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-950 text-slate-200 antialiased;
+  background-image:
+    radial-gradient(60rem 40rem at 15% -10%, var(--grad-a), transparent 60%),
+    radial-gradient(50rem 40rem at 110% 10%, var(--grad-b), transparent 55%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/5 bg-base-850/70 backdrop-blur shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 hover:bg-brand-400 shadow-glow;
+    color: #fff; /* always white on the blue button, in both themes */
+  }
+  .btn-ghost {
+    @apply btn border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10;
+  }
+  .btn-danger {
+    @apply btn border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20;
+  }
+  .input {
+    @apply w-full rounded-xl border border-white/10 bg-base-900/80 px-3.5 py-2.5 text-sm text-slate-100
+           placeholder:text-slate-500 focus:border-brand-400/60 focus:outline-none focus:ring-2 focus:ring-brand-400/30;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}
+
+/* Slim scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-white/10;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/20;
+}

@@ -1,0 +1,19 @@
+node_modules
+.next
+out
+*.log
+
+# Editor / local tooling
+.claude
+
+# Local data — never commit secrets or backups
+/data
+.env
+.env.local
+
+# Backup archives (too large for GitHub / not source)
+*.zip
+
+# Build artifacts
+tsconfig.tsbuildinfo
+next-env.d.ts
