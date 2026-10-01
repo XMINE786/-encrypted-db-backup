@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { EngineChip, StatusBadge, Spinner, EmptyState } from "@/components/ui";
 import { formatBytes, formatDuration, formatDateTime, timeAgo } from "@/lib/format";
 import { usePermissions } from "@/components/usePermissions";
+import { useRestore } from "@/components/RestoreManager";
 
 interface Backup {
   id: number;
@@ -20,6 +21,7 @@ interface Backup {
   filename: string | null;
   verified: number | null;
   verify_error: string | null;
+  log: string | null;
 }
 
 /** Small badge showing the auto-verification result of a successful backup. */
@@ -47,139 +49,67 @@ function VerifyBadge({ b }: { b: Backup }) {
   );
 }
 
-/** Modal to restore a backup into a caller-specified TARGET database. */
-function RestoreModal({ backup, onClose }: { backup: Backup; onClose: () => void }) {
-  const isSqlite = backup.engine === "sqlite";
-  const [host, setHost] = useState("localhost");
-  const [port, setPort] = useState(backup.engine === "postgres" ? "5432" : "3306");
-  const [user, setUser] = useState(backup.engine === "postgres" ? "postgres" : "root");
-  const [database, setDatabase] = useState("");
-  const [password, setPassword] = useState("");
-  const [create, setCreate] = useState(true);
-  const [createRoles, setCreateRoles] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; output: string } | null>(null);
+/**
+ * Tails a backup's log in real time. Polls the logs endpoint ~1s while the
+ * backup is running (appending new lines like `tail -f`) and stops once done.
+ */
+function LiveLog({ backupId }: { backupId: number }) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const boxRef = useRef<HTMLPreElement>(null);
 
-  async function submit() {
-    setBusy(true);
-    setResult(null);
-    try {
-      const res = await fetch(`/api/backups/${backup.id}/restore`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ host, port, user, database, password, create, createRoles }),
-      });
-      const text = await res.text();
-      let data: { ok?: boolean; output?: string; error?: string } = {};
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function tick() {
       try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        // Empty/non-JSON response — usually the server ran out of memory or the
-        // request was interrupted mid-restore.
-        setResult({
-          ok: false,
-          output:
-            `Server returned no response (HTTP ${res.status}). The restore was likely ` +
-            `interrupted (e.g. the dev server reloaded). Check the target database, then retry.`,
-        });
-        return;
+        const res = await fetch(`/api/backups/${backupId}/logs`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!active) return;
+        setLines(data.lines || []);
+        setDone(!!data.done);
+        setErr(null);
+        if (!data.done) timer = setTimeout(tick, 1000);
+      } catch (e: any) {
+        if (!active) return;
+        setErr(String(e.message || e));
+        timer = setTimeout(tick, 2000);
       }
-      setResult({ ok: res.ok && !!data.ok, output: data.output || data.error || "(no output)" });
-    } catch (e: any) {
-      setResult({ ok: false, output: String(e.message || e) });
-    } finally {
-      setBusy(false);
     }
-  }
+    tick();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [backupId]);
 
-  const inputCls =
-    "w-full rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-400/50";
+  // Keep the newest line in view, like a terminal.
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+  }, [lines]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="card w-full max-w-lg animate-fade-in p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold text-slate-100">
-          Restore <span className="text-indigo-300">{backup.connectionName}</span>
-        </h2>
-        <p className="mt-1 text-xs text-amber-300/90">
-          Loads this backup into the TARGET database below. It writes schema + data into
-          that target — pick a restore/scratch database, not your live source.
-        </p>
-
-        <div className="mt-4 space-y-3">
-          {isSqlite ? (
-            <label className="block">
-              <span className="mb-1 block text-xs text-slate-400">Target SQLite file path</span>
-              <input className={inputCls} value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="/path/to/restore.db" />
-            </label>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-slate-400">Host</span>
-                  <input className={inputCls} value={host} onChange={(e) => setHost(e.target.value)} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-slate-400">Port</span>
-                  <input className={inputCls} value={port} onChange={(e) => setPort(e.target.value)} />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-slate-400">User</span>
-                  <input className={inputCls} value={user} onChange={(e) => setUser(e.target.value)} />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-slate-400">Password</span>
-                  <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </label>
-              </div>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-400">Target database</span>
-                <input className={inputCls} value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="e.g. aiou_restore" />
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />
-                Recreate the target database first (drops it if it exists → clean restore)
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={createRoles} onChange={(e) => setCreateRoles(e.target.checked)} />
-                Auto-create roles the dump references (fixes &quot;role … does not exist&quot;)
-              </label>
-            </>
-          )}
-        </div>
-
-        {result && (
-          <pre
-            className={`mt-4 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg p-3 text-xs ${
-              result.ok ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"
-            }`}
-          >
-            {result.ok ? "✓ RESTORE SUCCEEDED\n" : "✕ RESTORE FAILED\n"}
-            {result.output}
-          </pre>
+    <div>
+      <div className="mb-1 flex items-center gap-2 text-xs">
+        {done ? (
+          <span className="text-slate-500">log complete</span>
+        ) : (
+          <span className="flex items-center gap-1.5 text-emerald-400">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+            live
+          </span>
         )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost text-sm" onClick={onClose} disabled={busy}>
-            {result?.ok ? "Close" : "Cancel"}
-          </button>
-          <button
-            className="btn-primary text-sm"
-            onClick={submit}
-            disabled={busy || !database}
-          >
-            {busy ? "Restoring…" : "Restore now"}
-          </button>
-        </div>
+        {err && <span className="text-amber-400">reconnecting…</span>}
       </div>
+      <pre
+        ref={boxRef}
+        className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900/70 p-3 font-mono text-xs leading-relaxed text-slate-300"
+      >
+        {lines.length ? lines.join("\n") : "waiting for output…"}
+        {!done && <span className="animate-pulse"> ▋</span>}
+      </pre>
     </div>
   );
 }
@@ -189,8 +119,9 @@ export function BackupsClient() {
   const connectionId = params.get("connectionId");
   const [rows, setRows] = useState<Backup[] | null>(null);
   const [openError, setOpenError] = useState<number | null>(null);
-  const [restoreOf, setRestoreOf] = useState<Backup | null>(null);
+  const [openLog, setOpenLog] = useState<number | null>(null);
   const { perms } = usePermissions();
+  const { startRestore } = useRestore();
 
   async function load() {
     const qs = connectionId ? `?connectionId=${connectionId}` : "";
@@ -240,11 +171,13 @@ export function BackupsClient() {
                 <th className="px-5 py-3 font-medium">Size</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Integrity</th>
+                <th className="px-5 py-3 font-medium">Logs</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((b) => (
-                <tr key={b.id} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]">
+                <Fragment key={b.id}>
+                <tr className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2.5">
                       <EngineChip engine={b.engine} size="sm" />
@@ -288,7 +221,37 @@ export function BackupsClient() {
                   <td className="px-5 py-3">
                     <VerifyBadge b={b} />
                   </td>
+                  <td className="px-5 py-3">
+                    {b.log || b.status === "running" ? (
+                      <button
+                        onClick={() => setOpenLog(openLog === b.id ? null : b.id)}
+                        className="btn-ghost !py-1 !px-2.5 text-xs"
+                      >
+                        {openLog === b.id
+                          ? "Hide"
+                          : b.status === "running"
+                          ? "Live ●"
+                          : "View"}
+                      </button>
+                    ) : (
+                      <span className="text-slate-600">—</span>
+                    )}
+                  </td>
                 </tr>
+                {openLog === b.id && (b.log || b.status === "running") && (
+                  <tr key={`${b.id}-log`} className="border-b border-white/5 last:border-0">
+                    <td colSpan={7} className="px-5 pb-3">
+                      {b.status === "running" ? (
+                        <LiveLog backupId={b.id} />
+                      ) : (
+                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900/70 p-3 font-mono text-xs leading-relaxed text-slate-300">
+                          {b.log}
+                        </pre>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -335,7 +298,7 @@ export function BackupsClient() {
                             Decrypted
                           </a>
                           {perms.runBackups && (
-                            <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={() => setRestoreOf(b)}>
+                            <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={() => startRestore({ id: b.id, connectionName: b.connectionName, engine: b.engine })}>
                               Restore
                             </button>
                           )}
@@ -385,6 +348,30 @@ export function BackupsClient() {
             {b.error && (
               <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-red-500/10 p-2 text-xs text-red-300">{b.error}</pre>
             )}
+            {(b.log || b.status === "running") && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setOpenLog(openLog === b.id ? null : b.id)}
+                  className="btn-ghost !py-1 !px-2.5 text-xs"
+                >
+                  {openLog === b.id
+                    ? "Hide logs"
+                    : b.status === "running"
+                    ? "Live logs ●"
+                    : "View logs"}
+                </button>
+                {openLog === b.id &&
+                  (b.status === "running" ? (
+                    <div className="mt-2">
+                      <LiveLog backupId={b.id} />
+                    </div>
+                  ) : (
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900/70 p-2 font-mono text-xs text-slate-300">
+                      {b.log}
+                    </pre>
+                  ))}
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               {b.status === "success" && (
                 <>
@@ -395,7 +382,7 @@ export function BackupsClient() {
                     Decrypted
                   </a>
                   {perms.runBackups && (
-                    <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={() => setRestoreOf(b)}>
+                    <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={() => startRestore({ id: b.id, connectionName: b.connectionName, engine: b.engine })}>
                       Restore
                     </button>
                   )}
@@ -410,8 +397,6 @@ export function BackupsClient() {
           </div>
         ))}
       </div>
-
-      {restoreOf && <RestoreModal backup={restoreOf} onClose={() => setRestoreOf(null)} />}
     </div>
   );
 }

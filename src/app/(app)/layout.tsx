@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { Sidebar } from "@/components/Sidebar";
+import { RestoreProvider } from "@/components/RestoreManager";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         canEditConnections={user.permissions.editConnections}
       />
       <main className="flex-1 min-w-0 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
-        <div className="w-full">{children}</div>
+        {/* RestoreProvider lives here (not inside a page) so a running restore's
+            dock survives navigation between pages. */}
+        <RestoreProvider>
+          <div className="w-full">{children}</div>
+        </RestoreProvider>
       </main>
     </div>
   );

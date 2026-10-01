@@ -1,10 +1,12 @@
 import { spawn } from "child_process";
 import zlib from "zlib";
+import { Transform } from "stream";
 import fs from "fs";
 import path from "path";
 import { db, BACKUP_DIR, ConnectionRow, BackupRow } from "./db";
 import { decryptString, createEncryptStream } from "./crypto";
 import { verifyEncryptedBackup } from "./verify";
+import { startLiveLog, appendLiveLog, endLiveLog } from "./backup-logs";
 import {
   buildDumpCommand,
   buildTestCommand,
@@ -87,8 +89,29 @@ export async function runBackup(
   // second pass would only waste CPU for no gain.
   const compress = c.engine !== "mongodb";
 
+  // Human-readable, timestamped account of each pipeline stage, surfaced in the
+  // UI so you can see the dump → gzip → encrypt → verify flow. Each line is also
+  // published to the live-log registry so the UI can tail it in real time.
+  // Never logs the command args (they can embed the DB password).
+  startLiveLog(backupId);
+  const logLines: string[] = [];
+  const log = (msg: string) => {
+    const line = `[+${((Date.now() - started) / 1000).toFixed(1)}s] ${msg}`;
+    logLines.push(line);
+    appendLiveLog(backupId, line);
+  };
+  const num = (n: number) => n.toLocaleString("en-US");
+  log(`Starting backup of "${c.name}" [${c.engine}] · trigger: ${trigger}`);
+
   try {
     const spec = buildDumpCommand(connParams(c));
+    log(`Dumping with ${spec.cmd}`);
+    log(
+      compress
+        ? "Compressing stream with gzip"
+        : "Compression skipped (mongodump already gzips its archive)"
+    );
+    log(`Encrypting with AES-256-GCM → ${filename}`);
     await new Promise<void>((resolve, reject) => {
       const child = spawn(spec.cmd, spec.args, {
         env: { ...process.env, ...spec.env },
@@ -113,13 +136,25 @@ export async function runBackup(
         );
       });
 
-      // dump stdout -> [gzip] -> cipher -> file
+      // Count raw dump bytes with a pass-through Transform (keeps backpressure
+      // intact, unlike a bare 'data' listener) so the log can show the
+      // compression ratio.
+      let rawBytes = 0;
+      const counter = new Transform({
+        transform(chunk, _enc, cb) {
+          rawBytes += chunk.length;
+          cb(null, chunk);
+        },
+      });
+      counter.on("error", reject);
+
+      // dump stdout -> counter -> [gzip] -> cipher -> file
       if (compress) {
         const gzip = zlib.createGzip();
         gzip.on("error", reject);
-        child.stdout.pipe(gzip).pipe(cipher.stream).pipe(out);
+        child.stdout.pipe(counter).pipe(gzip).pipe(cipher.stream).pipe(out);
       } else {
-        child.stdout.pipe(cipher.stream).pipe(out);
+        child.stdout.pipe(counter).pipe(cipher.stream).pipe(out);
       }
 
       out.on("finish", async () => {
@@ -131,6 +166,7 @@ export async function runBackup(
           try {
             fs.unlinkSync(filePath);
           } catch {}
+          log("Dump produced 0 bytes — treating as failure");
           reject(
             new Error(
               stderr.trim() ||
@@ -139,6 +175,13 @@ export async function runBackup(
           );
           return;
         }
+        log(`Dump read ${num(rawBytes)} bytes from ${spec.cmd}`);
+        log(
+          `Stored ${num(size)} bytes on disk` +
+            (compress && rawBytes
+              ? ` (${((size / rawBytes) * 100).toFixed(1)}% of dump after gzip + AES-256-GCM)`
+              : "")
+        );
         const authTag = cipher.getTag();
         // Auto-verify: stream-decrypt what we just wrote (proves integrity + key)
         // and sanity-check the dump is complete for this engine. Streaming keeps
@@ -156,14 +199,18 @@ export async function runBackup(
           );
           verified = check.ok ? 1 : 0;
           if (!check.ok) verifyError = check.summary;
+          log(check.ok ? `Verified: ${check.summary}` : `Verify FAILED: ${check.summary}`);
         } catch (e: any) {
           verified = 0;
           verifyError = `verification error: ${e.message || e}`;
+          log(`Verify error: ${e.message || e}`);
         }
+        if (stderr.trim()) log(`${spec.cmd} messages:\n${stderr.trim()}`);
+        log(`Backup finished in ${((Date.now() - started) / 1000).toFixed(1)}s`);
         d.prepare(
           `UPDATE backups SET status='success', filename=?, iv=?, auth_tag=?,
              size_bytes=?, duration_ms=?, finished_at=?, verified=?, verify_error=?,
-             compressed=?
+             compressed=?, log=?
            WHERE id=?`
         ).run(
           filename,
@@ -175,6 +222,7 @@ export async function runBackup(
           verified,
           verifyError,
           compress ? 1 : 0,
+          logLines.join("\n"),
           backupId
         );
         resolve();
@@ -190,15 +238,24 @@ export async function runBackup(
     });
 
     applyRetention(c);
+    endLiveLog(backupId);
     return backupId;
   } catch (err: any) {
     // Clean up partial file and mark failed.
     try {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch {}
+    log(`FAILED: ${String(err.message || err)}`);
     d.prepare(
-      `UPDATE backups SET status='failed', error=?, duration_ms=?, finished_at=? WHERE id=?`
-    ).run(String(err.message || err), Date.now() - started, new Date().toISOString(), backupId);
+      `UPDATE backups SET status='failed', error=?, duration_ms=?, finished_at=?, log=? WHERE id=?`
+    ).run(
+      String(err.message || err),
+      Date.now() - started,
+      new Date().toISOString(),
+      logLines.join("\n"),
+      backupId
+    );
+    endLiveLog(backupId);
     return backupId;
   }
 }

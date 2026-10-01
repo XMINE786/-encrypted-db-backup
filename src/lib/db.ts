@@ -110,6 +110,9 @@ function migrate(d: Database.Database) {
   // whether readers gunzip after decrypt. Old backups default to 0 (raw).
   if (!bcols.includes("compressed"))
     d.exec(`ALTER TABLE backups ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0`);
+  // log: human-readable, per-stage account of the dump → gzip → encrypt →
+  // verify pipeline, shown in the UI. Null for backups taken before this column.
+  if (!bcols.includes("log")) d.exec(`ALTER TABLE backups ADD COLUMN log TEXT`);
   // Legacy password-only accounts can no longer authenticate; drop them so the
   // first key-based admin setup can run cleanly, then remove the NOT NULL
   // password column that would otherwise block key-only inserts.
@@ -181,4 +184,6 @@ export interface BackupRow {
   verify_error: string | null;
   /** 1 = payload was gzipped before encryption and must be gunzipped on read. */
   compressed: number;
+  /** Per-stage pipeline log (dump → gzip → encrypt → verify). Null if not recorded. */
+  log: string | null;
 }
