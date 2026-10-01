@@ -10,7 +10,7 @@
  *   1. Metadata lookup   — finds the backup row (latest success, or --id/--file).
  *   2. Integrity (GCM)   — authenticated decryption; if the tag verifies, the
  *                          file is byte-for-byte intact and matches your key.
- *   3. Size match        — decrypted length vs size_bytes recorded at dump time.
+ *   3. Size match        — on-disk file size vs size_bytes recorded at dump time.
  *   4. Content sanity    — engine-specific markers (pg_dump header/footer, etc.)
  *                          + object counts (CREATE TABLE / COPY / INSERT).
  *
@@ -24,6 +24,7 @@
  */
 
 const fs = require("fs");
+const zlib = require("zlib");
 const path = require("path");
 const crypto = require("crypto");
 const readline = require("readline");
@@ -153,7 +154,14 @@ function scanStream(row, key, outStream) {
   return new Promise((resolve) => {
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(row.iv, "hex"));
     decipher.setAuthTag(Buffer.from(row.auth_tag, "hex"));
-    const src = fs.createReadStream(path.join(BACKUP_DIR, row.filename)).pipe(decipher);
+    // file -> GCM decipher -> [gunzip] -> plaintext dump. Forward decipher
+    // errors onto the gunzip stream since pipe() doesn't propagate them.
+    let src = fs.createReadStream(path.join(BACKUP_DIR, row.filename)).pipe(decipher);
+    if (row.compressed) {
+      const gunzip = zlib.createGunzip();
+      decipher.on("error", (e) => gunzip.emit("error", e));
+      src = src.pipe(gunzip);
+    }
 
     const s = {
       bytes: 0,
@@ -257,11 +265,17 @@ async function verify(row, key) {
   }
   console.log("  integrity (GCM tag) ... " + C.g("VERIFIED — file intact & key correct"));
 
-  const sizeOk = !row.size_bytes || r.stats.bytes === row.size_bytes;
+  // size_bytes records the on-disk (encrypted, possibly gzipped) file size, so
+  // compare against the actual file — not the decrypted stream length, which is
+  // larger once a compressed payload is inflated.
+  const diskBytes = fs.statSync(fp).size;
+  const sizeOk = !row.size_bytes || diskBytes === row.size_bytes;
   console.log(
     "  on-disk size .......... " +
-      (sizeOk ? C.g(`OK (${r.stats.bytes} bytes)`) : C.y(`decrypted ${r.stats.bytes} vs meta ${row.size_bytes}`))
+      (sizeOk ? C.g(`OK (${diskBytes} bytes)`) : C.y(`on disk ${diskBytes} vs meta ${row.size_bytes}`))
   );
+  if (row.compressed)
+    console.log(C.dim(`  decompressed .......... ${r.stats.bytes} bytes (gzip)`));
 
   const res = evaluate(row.engine, r.stats);
   for (const d of res.details) console.log("  " + d);

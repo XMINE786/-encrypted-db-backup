@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import zlib from "zlib";
 import fs from "fs";
 import path from "path";
 import readline from "readline";
@@ -89,11 +90,17 @@ function runStream(
   });
 }
 
-/** file -> AES-GCM decipher (streaming). */
+/** file -> AES-GCM decipher -> [gunzip] (streaming). */
 function decryptStream(row: BackupRow): NodeJS.ReadableStream {
-  return fs
+  const decipher = fs
     .createReadStream(path.join(BACKUP_DIR, row.filename!))
     .pipe(createDecryptStream(row.iv!, row.auth_tag!));
+  if (!row.compressed) return decipher;
+  // pipe() doesn't forward errors, so a GCM auth failure on the decipher would
+  // otherwise be lost once callers listen on the gunzip stream. Re-emit it.
+  const gunzip = zlib.createGunzip();
+  decipher.on("error", (e) => gunzip.emit("error", e));
+  return decipher.pipe(gunzip);
 }
 
 const qIdent = (s: string) => `"${s.replace(/"/g, '""')}"`;

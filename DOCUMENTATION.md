@@ -167,12 +167,13 @@ idempotent `ALTER TABLE ... ADD COLUMN` guards, so upgrading in place is safe.
 | filename | TEXT | `<name>-<timestamp>.<ext>.enc` |
 | iv | TEXT | GCM IV (hex) needed to decrypt |
 | auth_tag | TEXT | GCM auth tag (hex) |
-| size_bytes | INTEGER | encrypted file size on disk |
+| size_bytes | INTEGER | encrypted (and gzipped) file size on disk |
 | duration_ms | INTEGER | |
 | error | TEXT | failure message |
 | started_at, finished_at | TEXT | |
 | **verified** | INTEGER | `null` = not checked, `1` = passed, `0` = failed |
 | **verify_error** | TEXT | reason when verification fails |
+| **compressed** | INTEGER | `1` = payload gzipped before encryption, `0` = raw (old backups / MongoDB) |
 
 ### `users`
 ECDSA public key, key id, fingerprint, `is_admin`, `permissions` (JSON), timestamps.
@@ -313,7 +314,10 @@ cron task immediately.
 
 1. Inserts a `running` backup row.
 2. Builds the dump command (`buildDumpCommand`) and spawns the tool.
-3. Pipes **tool stdout → AES-256-GCM cipher stream → `data/backups/<name>.enc`**.
+3. Pipes **tool stdout → gzip → AES-256-GCM cipher stream → `data/backups/<name>.enc`**
+   (gzip is skipped for MongoDB, whose `mongodump` archive is already gzipped; the
+   `compressed` flag on the backup row records which path was taken so restores know
+   whether to gunzip).
 4. **Zero-byte guard:** an empty dump (wrong path/creds) is treated as **failed**,
    not silently "successful".
 5. On success: computes the GCM tag, runs [verification](#93-automatic-verification),

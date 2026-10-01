@@ -10,7 +10,7 @@ Oracle, MongoDB, SQLite), keep the backups **encrypted**, **verify** them, and
 
 | Step | What happens |
 |---|---|
-| **1. Back up** | Runs the DB's native dump tool and streams the output through **AES-256-GCM** straight into an encrypted `.enc` file. Plaintext never hits the disk. |
+| **1. Back up** | Runs the DB's native dump tool and streams the output through **gzip + AES-256-GCM** straight into a compressed, encrypted `.enc` file. Plaintext never hits the disk. |
 | **2. Verify** | Every backup is auto-checked: decryption proves it's **intact + key is correct**, and header/footer markers prove the dump is **complete** (not truncated). Shown as ✓ Verified. |
 | **3. Restore** | Decrypts and loads a backup into a **target** database you choose (never the live source). |
 

@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import zlib from "zlib";
 import fs from "fs";
 import path from "path";
 import { db, BACKUP_DIR, ConnectionRow, BackupRow } from "./db";
@@ -81,6 +82,10 @@ export async function runBackup(
   const stamp = startedAt.replace(/[:.]/g, "-");
   const filename = `${c.name.replace(/[^a-z0-9_-]/gi, "_")}-${stamp}.${ext}.enc`;
   const filePath = path.join(BACKUP_DIR, filename);
+  // Gzip the dump before encrypting — SQL text compresses heavily. MongoDB is
+  // skipped because mongodump already emits a gzipped archive (--gzip), so a
+  // second pass would only waste CPU for no gain.
+  const compress = c.engine !== "mongodb";
 
   try {
     const spec = buildDumpCommand(connParams(c));
@@ -108,8 +113,14 @@ export async function runBackup(
         );
       });
 
-      // dump stdout -> cipher -> file
-      child.stdout.pipe(cipher.stream).pipe(out);
+      // dump stdout -> [gzip] -> cipher -> file
+      if (compress) {
+        const gzip = zlib.createGzip();
+        gzip.on("error", reject);
+        child.stdout.pipe(gzip).pipe(cipher.stream).pipe(out);
+      } else {
+        child.stdout.pipe(cipher.stream).pipe(out);
+      }
 
       out.on("finish", async () => {
         // Persist IV + auth tag needed to decrypt later.
@@ -136,7 +147,13 @@ export async function runBackup(
         let verified: number | null = null;
         let verifyError: string | null = null;
         try {
-          const check = await verifyEncryptedBackup(filePath, cipher.iv, authTag, c.engine);
+          const check = await verifyEncryptedBackup(
+            filePath,
+            cipher.iv,
+            authTag,
+            c.engine,
+            compress
+          );
           verified = check.ok ? 1 : 0;
           if (!check.ok) verifyError = check.summary;
         } catch (e: any) {
@@ -145,7 +162,8 @@ export async function runBackup(
         }
         d.prepare(
           `UPDATE backups SET status='success', filename=?, iv=?, auth_tag=?,
-             size_bytes=?, duration_ms=?, finished_at=?, verified=?, verify_error=?
+             size_bytes=?, duration_ms=?, finished_at=?, verified=?, verify_error=?,
+             compressed=?
            WHERE id=?`
         ).run(
           filename,
@@ -156,6 +174,7 @@ export async function runBackup(
           new Date().toISOString(),
           verified,
           verifyError,
+          compress ? 1 : 0,
           backupId
         );
         resolve();

@@ -67,8 +67,9 @@ npm start
 ## How it works
 
 **1. Back up** — DevGems runs the database's native dump tool and streams the output through
-an AES-256-GCM cipher straight into an encrypted `.enc` file. Because it streams, multi-GB
-databases never need to fit in memory.
+gzip and then an AES-256-GCM cipher straight into an encrypted `.enc` file (MongoDB skips the
+gzip step since `mongodump` already compresses). Because it streams, multi-GB databases never
+need to fit in memory.
 
 **2. Verify** — every backup is automatically decrypted and checked. Decryption proves the
 file is intact and the key is correct; header/footer markers prove the dump isn't truncated.

@@ -1,4 +1,5 @@
 import fs from "fs";
+import zlib from "zlib";
 import { createDecryptStream } from "./crypto";
 import { EngineId } from "./engines";
 
@@ -57,7 +58,8 @@ export function verifyEncryptedBackup(
   filePath: string,
   iv: string,
   authTag: string,
-  engine: string
+  engine: string,
+  compressed = false
 ): Promise<DumpCheck> {
   const CAP = 8192; // bytes of head/tail to retain for marker checks
   return new Promise((resolve) => {
@@ -65,8 +67,15 @@ export function verifyEncryptedBackup(
     let tail = Buffer.alloc(0);
     let total = 0;
     let stream: NodeJS.ReadableStream;
+    const fail = (e: any) =>
+      resolve({ ok: false, summary: `integrity check failed: ${e.message || e}` });
     try {
-      stream = fs.createReadStream(filePath).pipe(createDecryptStream(iv, authTag));
+      // file -> GCM decipher -> [gunzip] -> plaintext dump. A GCM auth failure
+      // throws on the decipher, so attach the handler there too — pipe() does
+      // not forward error events downstream to the gunzip stream.
+      const decipher = fs.createReadStream(filePath).pipe(createDecryptStream(iv, authTag));
+      decipher.on("error", fail);
+      stream = compressed ? decipher.pipe(zlib.createGunzip()) : decipher;
     } catch (e: any) {
       return resolve({ ok: false, summary: `could not open backup: ${e.message || e}` });
     }
@@ -83,9 +92,7 @@ export function verifyEncryptedBackup(
       if (total === 0) return resolve({ ok: false, summary: "empty payload (0 bytes)" });
       resolve(inspectDumpParts(engine, head.toString("utf8"), tail.toString("utf8")));
     });
-    // A GCM auth failure (corrupt file / wrong key) surfaces here.
-    stream.on("error", (e: any) =>
-      resolve({ ok: false, summary: `integrity check failed: ${e.message || e}` })
-    );
+    // A gunzip failure (corrupt payload) surfaces here; GCM failures above.
+    stream.on("error", fail);
   });
 }

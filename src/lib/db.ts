@@ -106,6 +106,10 @@ function migrate(d: Database.Database) {
   // verified: NULL = not checked, 1 = passed, 0 = failed
   if (!bcols.includes("verified")) d.exec(`ALTER TABLE backups ADD COLUMN verified INTEGER`);
   if (!bcols.includes("verify_error")) d.exec(`ALTER TABLE backups ADD COLUMN verify_error TEXT`);
+  // compressed: 1 = payload was gzipped before encryption, 0 = raw. Drives
+  // whether readers gunzip after decrypt. Old backups default to 0 (raw).
+  if (!bcols.includes("compressed"))
+    d.exec(`ALTER TABLE backups ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0`);
   // Legacy password-only accounts can no longer authenticate; drop them so the
   // first key-based admin setup can run cleanly, then remove the NOT NULL
   // password column that would otherwise block key-only inserts.
@@ -175,4 +179,6 @@ export interface BackupRow {
   /** Post-backup verification: null = not checked, 1 = passed, 0 = failed. */
   verified: number | null;
   verify_error: string | null;
+  /** 1 = payload was gzipped before encryption and must be gunzipped on read. */
+  compressed: number;
 }

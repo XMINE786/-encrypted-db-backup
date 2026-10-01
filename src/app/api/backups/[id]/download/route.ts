@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
+import zlib from "zlib";
 import path from "path";
 import { Readable } from "stream";
 import { db, BACKUP_DIR, BackupRow } from "@/lib/db";
@@ -35,10 +36,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     ? row.filename.replace(/\.enc$/, "")
     : row.filename;
 
+  // decrypt=1 yields the true plaintext dump, so gunzip too when the payload
+  // was compressed. The raw (?decrypt=0) download is the opaque .enc blob.
   const fileStream = fs.createReadStream(filePath);
-  const nodeStream = decrypt
-    ? fileStream.pipe(createDecryptStream(row.iv, row.auth_tag))
-    : fileStream;
+  let nodeStream: Readable = fileStream;
+  if (decrypt) {
+    nodeStream = fileStream.pipe(createDecryptStream(row.iv, row.auth_tag));
+    if (row.compressed) nodeStream = nodeStream.pipe(zlib.createGunzip());
+  }
 
   // Bridge Node stream -> Web ReadableStream for the Next.js Response.
   const webStream = Readable.toWeb(nodeStream) as unknown as ReadableStream;

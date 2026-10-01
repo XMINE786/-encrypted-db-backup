@@ -34,6 +34,7 @@
  */
 
 const fs = require("fs");
+const zlib = require("zlib");
 const path = require("path");
 const crypto = require("crypto");
 const readline = require("readline");
@@ -149,7 +150,9 @@ function decrypt(row) {
   try {
     const d = crypto.createDecipheriv("aes-256-gcm", masterKey(), Buffer.from(row.iv, "hex"));
     d.setAuthTag(Buffer.from(row.auth_tag, "hex"));
-    return Buffer.concat([d.update(fs.readFileSync(fp)), d.final()]);
+    const plain = Buffer.concat([d.update(fs.readFileSync(fp)), d.final()]);
+    // Backups written with compressed=1 were gzipped before encryption.
+    return row.compressed ? zlib.gunzipSync(plain) : plain;
   } catch (e) {
     die(
       "decryption/authentication FAILED — file is corrupt or BACKUP_ENCRYPTION_KEY is wrong."
