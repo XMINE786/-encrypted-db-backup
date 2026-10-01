@@ -270,7 +270,13 @@ export function requirePermission(
 export const sessionCookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  // `Secure` cookies are dropped by browsers over plain HTTP. Set
+  // ALLOW_INSECURE_COOKIES=1 to serve over HTTP on a trusted/internal network.
+  // Leave it unset in any internet-facing deployment and terminate HTTPS.
+  secure:
+    process.env.ALLOW_INSECURE_COOKIES === "1"
+      ? false
+      : process.env.NODE_ENV === "production",
   path: "/",
   maxAge: SESSION_TTL_MS / 1000,
 };
