@@ -24,6 +24,7 @@ export function connParams(c: ConnectionRow): ConnParams {
     username: c.username,
     password: c.password_enc ? decryptString(c.password_enc) : "",
     options: c.options,
+    schema: c.schema,
   };
 }
 
@@ -106,6 +107,7 @@ export async function runBackup(
   try {
     const spec = buildDumpCommand(connParams(c));
     log(`Dumping with ${spec.cmd}`);
+    if (c.schema?.trim()) log(`Schema filter: ${c.schema.trim()}`);
     log(
       compress
         ? "Compressing stream with gzip"

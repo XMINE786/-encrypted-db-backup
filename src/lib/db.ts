@@ -31,6 +31,7 @@ function migrate(d: Database.Database) {
       username     TEXT NOT NULL DEFAULT '',
       password_enc TEXT NOT NULL DEFAULT '',
       options      TEXT,
+      schema       TEXT,               -- schema(s) to dump (engine-specific), nullable
       schedule     TEXT,               -- cron expression, nullable
       retention    INTEGER DEFAULT 0,  -- keep N newest backups (0 = keep all)
       created_at   TEXT NOT NULL,
@@ -113,6 +114,12 @@ function migrate(d: Database.Database) {
   // log: human-readable, per-stage account of the dump → gzip → encrypt →
   // verify pipeline, shown in the UI. Null for backups taken before this column.
   if (!bcols.includes("log")) d.exec(`ALTER TABLE backups ADD COLUMN log TEXT`);
+
+  // --- Migration: optional schema selection for the dump (Postgres) ---
+  const ccols = (d.prepare(`PRAGMA table_info(connections)`).all() as { name: string }[]).map(
+    (c) => c.name
+  );
+  if (!ccols.includes("schema")) d.exec(`ALTER TABLE connections ADD COLUMN schema TEXT`);
   // Legacy password-only accounts can no longer authenticate; drop them so the
   // first key-based admin setup can run cleanly, then remove the NOT NULL
   // password column that would otherwise block key-only inserts.
@@ -160,6 +167,8 @@ export interface ConnectionRow {
   username: string;
   password_enc: string;
   options: string | null;
+  /** Schema(s) to dump, engine-specific (Postgres -n). Comma/space separated. */
+  schema: string | null;
   schedule: string | null;
   retention: number;
   created_at: string;

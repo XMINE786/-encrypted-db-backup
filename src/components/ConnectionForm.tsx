@@ -24,6 +24,7 @@ export interface ConnectionFormValues {
   username: string;
   password: string;
   options: string;
+  schema: string;
   schedule: string;
   retention: string;
   hasPassword?: boolean;
@@ -50,6 +51,7 @@ export function ConnectionForm({ initial }: { initial?: Partial<ConnectionFormVa
     username: "",
     password: "",
     options: "",
+    schema: "",
     schedule: "",
     retention: "0",
     ...initial,
@@ -81,6 +83,9 @@ export function ConnectionForm({ initial }: { initial?: Partial<ConnectionFormVa
       ...s,
       engine,
       port: def.defaultPort ? String(def.defaultPort) : "",
+      // The schema field is hidden for engines that don't support it; clear any
+      // stale value so it isn't silently persisted.
+      schema: def.schemas ? s.schema : "",
     }));
   }
 
@@ -195,6 +200,21 @@ export function ConnectionForm({ initial }: { initial?: Partial<ConnectionFormVa
               required
             />
           </div>
+
+          {engineDef.schemas && (
+            <div className="sm:col-span-2">
+              <label className="label">Schema (optional)</label>
+              <input
+                className="input"
+                placeholder="public  (blank = all schemas; separate multiple with commas)"
+                value={v.schema}
+                onChange={(e) => set("schema", e.target.value)}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Limit the dump to one or more schemas. Leave blank to back up the whole database.
+              </p>
+            </div>
+          )}
         </div>
 
         <p className="mt-4 rounded-lg border border-white/5 bg-base-900/60 px-3 py-2 text-xs text-slate-500">

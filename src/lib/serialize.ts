@@ -11,6 +11,7 @@ export interface ConnectionDTO {
   username: string;
   hasPassword: boolean;
   options: string | null;
+  schema: string | null;
   schedule: string | null;
   retention: number;
   created_at: string;
@@ -28,6 +29,7 @@ export function toConnectionDTO(c: ConnectionRow): ConnectionDTO {
     username: c.username,
     hasPassword: !!c.password_enc,
     options: c.options,
+    schema: c.schema,
     schedule: c.schedule,
     retention: c.retention,
     created_at: c.created_at,

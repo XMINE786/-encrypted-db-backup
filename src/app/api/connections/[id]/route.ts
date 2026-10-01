@@ -49,7 +49,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       `UPDATE connections SET
         name=@name, engine=@engine, host=@host, port=@port, database=@database,
         username=@username, password_enc=@password_enc, options=@options,
-        schedule=@schedule, retention=@retention, updated_at=@now
+        schema=@schema, schedule=@schedule, retention=@retention, updated_at=@now
        WHERE id=@id`
     )
     .run({
@@ -62,6 +62,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       username: b.username ?? existing.username,
       password_enc,
       options: b.options !== undefined ? b.options || null : existing.options,
+      schema: b.schema !== undefined ? b.schema || null : existing.schema,
       schedule,
       retention: b.retention !== undefined ? Number(b.retention) || 0 : existing.retention,
       now: new Date().toISOString(),

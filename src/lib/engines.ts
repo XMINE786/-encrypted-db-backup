@@ -23,6 +23,8 @@ export interface EngineDef {
   ext: string;
   /** Does this engine connect over the network (needs host/port)? */
   network: boolean;
+  /** Does this engine support dumping a specific schema (or set of schemas)? */
+  schemas?: boolean;
 }
 
 export const ENGINES: Record<EngineId, EngineDef> = {
@@ -34,6 +36,7 @@ export const ENGINES: Record<EngineId, EngineDef> = {
     note: "Requires pg_dump (postgresql-client) on the host.",
     ext: "sql",
     network: true,
+    schemas: true,
   },
   mysql: {
     id: "mysql",
@@ -99,6 +102,7 @@ export interface ConnParams {
   username: string;
   password: string; // already-decrypted plaintext
   options?: string | null; // extra CLI flags, space-separated
+  schema?: string | null; // schema(s) to dump, comma/space separated (Postgres)
 }
 
 export interface DumpSpec {
@@ -113,12 +117,19 @@ export function buildDumpCommand(p: ConnParams): DumpSpec {
   const extra = (p.options || "").trim() ? p.options!.trim().split(/\s+/) : [];
   switch (p.engine) {
     case "postgres": {
+      // One -n flag per requested schema (comma/space separated). When none is
+      // given, pg_dump dumps every schema as before.
+      const schemaFlags = (p.schema || "")
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .flatMap((s) => ["-n", s]);
       const args = [
         "-h", p.host,
         "-p", String(p.port ?? 5432),
         "-U", p.username,
         "--no-password",
         "-d", p.database,
+        ...schemaFlags,
         ...extra,
       ];
       return { cmd: "pg_dump", args, env: { PGPASSWORD: p.password } };

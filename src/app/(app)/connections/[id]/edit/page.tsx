@@ -36,6 +36,7 @@ export default function EditConnectionPage({ params }: { params: { id: string } 
           username: c.username,
           password: "",
           options: c.options ?? "",
+          schema: c.schema ?? "",
           schedule: c.schedule ?? "",
           retention: String(c.retention),
           hasPassword: c.hasPassword,

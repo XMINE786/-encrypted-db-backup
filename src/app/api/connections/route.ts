@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if ("error" in guard) return guard.error;
 
   const body = await req.json();
-  const { name, engine, host, port, database, username, password, options, schedule, retention } =
+  const { name, engine, host, port, database, username, password, options, schema, schedule, retention } =
     body || {};
 
   if (!name || !engine || !database) {
@@ -46,8 +46,8 @@ export async function POST(req: NextRequest) {
   const info = db()
     .prepare(
       `INSERT INTO connections
-        (name, engine, host, port, database, username, password_enc, options, schedule, retention, created_at, updated_at)
-       VALUES (@name,@engine,@host,@port,@database,@username,@password_enc,@options,@schedule,@retention,@now,@now)`
+        (name, engine, host, port, database, username, password_enc, options, schema, schedule, retention, created_at, updated_at)
+       VALUES (@name,@engine,@host,@port,@database,@username,@password_enc,@options,@schema,@schedule,@retention,@now,@now)`
     )
     .run({
       name,
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       username: username || "",
       password_enc: password ? encryptString(password) : "",
       options: options || null,
+      schema: schema || null,
       schedule: parsedSchedule.cron || null,
       retention: retention ? Number(retention) : 0,
       now,
